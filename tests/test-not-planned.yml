@@ -1,0 +1,46 @@
+name: Test close issue with not_planned reason
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Mock gh CLI
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/usr/bin/env bash
+          echo "gh called with args: $*"
+          echo "$*" >> /tmp/gh_calls.log
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          token: fake-token
+          repository: owner/repo
+          issue-number: "99"
+          close-reason: not_planned
+
+      - name: Assert gh issue close was called with not planned reason
+        run: |
+          echo "gh calls:"
+          cat /tmp/gh_calls.log || true
+          if ! grep -q "close" /tmp/gh_calls.log; then
+            echo "FAIL: gh issue close was not called"
+            exit 1
+          fi
+          if ! grep -q "not planned" /tmp/gh_calls.log; then
+            echo "FAIL: close reason 'not planned' not found in gh call"
+            exit 1
+          fi
+          if ! grep -q "99" /tmp/gh_calls.log; then
+            echo "FAIL: issue number 99 not found in gh call"
+            exit 1
+          fi
+          echo "PASS"

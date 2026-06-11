@@ -1,0 +1,47 @@
+name: Test close issue with comment
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Mock gh CLI
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/usr/bin/env bash
+          echo "gh called with args: $*"
+          echo "$*" >> /tmp/gh_calls.log
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          token: fake-token
+          repository: owner/repo
+          issue-number: "7"
+          close-reason: completed
+          comment: "Closing this issue as it has been resolved."
+
+      - name: Assert gh issue close was called with comment
+        run: |
+          echo "gh calls:"
+          cat /tmp/gh_calls.log || true
+          if ! grep -q "close" /tmp/gh_calls.log; then
+            echo "FAIL: gh issue close was not called"
+            exit 1
+          fi
+          if ! grep -q "comment" /tmp/gh_calls.log; then
+            echo "FAIL: --comment flag not found in gh call"
+            exit 1
+          fi
+          if ! grep -q "7" /tmp/gh_calls.log; then
+            echo "FAIL: issue number 7 not found in gh call"
+            exit 1
+          fi
+          echo "PASS"

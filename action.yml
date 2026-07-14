@@ -1,0 +1,106 @@
+name: 'Close Issue'
+description: 'A GitHub action to close an issue'
+inputs:
+  token:
+    required: false
+    description: 'GitHub auth token'
+    default: ${{ github.token }}
+  repository:
+    required: false
+    description: 'The GitHub repository containing the issue'
+    default: ${{ github.repository }}
+  issue-number:
+    required: false
+    description: 'The number of the issue to close'
+    default: ${{ github.event.issue.number }}
+  close-reason:
+    required: false
+    description: 'Reason for closing the issue, "completed" or "not_planned"'
+    default: 'completed'
+  comment:
+    required: false
+    description: 'A comment to make on the issue before closing'
+  labels:
+    required: false
+    description: 'A comma or newline separated list of labels.'
+runs:
+  using: composite
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Set parameters
+      id: params
+      shell: bash
+      env:
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_CLOSE_REASON: ${{ inputs.close-reason }}
+        INPUT_LABELS: ${{ inputs.labels }}
+      run: |
+        if [ -n "$INPUT_COMMENT" ]; then
+          delimiter="$(openssl rand -hex 8)"
+          safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
+          echo "comment<<$delimiter" >> "$GITHUB_OUTPUT"
+          echo "$safe_comment" >> "$GITHUB_OUTPUT"
+          echo "$delimiter" >> "$GITHUB_OUTPUT"
+        fi
+
+        safe_reason=$(printf '%s' "$INPUT_CLOSE_REASON" | tr -d '\n\r')
+        if [ "$safe_reason" == "not_planned" ]; then
+          echo 'close-reason=not planned' >> "$GITHUB_OUTPUT"
+        else
+          echo 'close-reason=completed' >> "$GITHUB_OUTPUT"
+        fi
+
+        # Convert labels to comma separated list
+        if [ -n "$INPUT_LABELS" ]; then
+          labels=$(printf '%s' "$INPUT_LABELS" | tr '\n' ',' | sed 's/,$//')
+          # Remove trailing comma and whitespace
+          labels=$(printf '%s' "$labels" | sed 's/,$//' | sed 's/[[:space:]]//g')
+          safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')
+          echo "labels=$safe_labels" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Close Issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
+        INPUT_COMMENT: ${{ steps.params.outputs.comment }}
+        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+      run: |
+        args=()
+        [ -n "$INPUT_COMMENT" ] && args+=(--comment "$INPUT_COMMENT")
+        gh issue close -R "$INPUT_REPOSITORY" \
+          --reason "$INPUT_CLOSE_REASON" \
+          "${args[@]}" \
+          "$INPUT_ISSUE_NUMBER"
+    - name: Add Labels
+      if: steps.params.outputs.labels != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_LABELS: ${{ steps.params.outputs.labels }}
+        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+      run: |
+        gh issue edit -R "$INPUT_REPOSITORY" \
+          --add-label "$INPUT_LABELS" \
+          "$INPUT_ISSUE_NUMBER"
+branding:
+  icon: 'git-pull-request'
+  color: 'gray-dark'

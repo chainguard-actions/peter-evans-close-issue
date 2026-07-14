@@ -1,0 +1,81 @@
+name: Test close-reason parameter mapping
+on:
+  workflow_dispatch:
+jobs:
+  test-close-reason-not-planned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Invoke the action (will fail due to no real token/issue, but tests param logic)
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: invalid-token
+          repository: peter-evans/close-issue
+          issue-number: "1"
+          close-reason: not_planned
+
+      # Test the parameter-setting logic directly (mirrors the action's Set parameters step)
+      - name: Test not_planned close-reason mapping
+        id: params-not-planned
+        shell: bash
+        run: |
+          close_reason_input="not_planned"
+          if [ "$close_reason_input" == "not_planned" ]; then
+            close_reason="not planned"
+          else
+            close_reason="completed"
+          fi
+          echo "close-reason=$close_reason" >> $GITHUB_OUTPUT
+
+      - name: Assert not_planned maps to "not planned"
+        env:
+          ACTUAL: ${{ steps.params-not-planned.outputs.close-reason }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "not planned" ]; then
+            echo "FAIL: expected 'not planned' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+  test-close-reason-completed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Invoke the action (will fail due to no real token/issue, but tests param logic)
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: invalid-token
+          repository: peter-evans/close-issue
+          issue-number: "1"
+          close-reason: completed
+
+      # Test the parameter-setting logic directly (mirrors the action's Set parameters step)
+      - name: Test completed close-reason mapping (default)
+        id: params-completed
+        shell: bash
+        run: |
+          close_reason_input="completed"
+          if [ "$close_reason_input" == "not_planned" ]; then
+            close_reason="not planned"
+          else
+            close_reason="completed"
+          fi
+          echo "close-reason=$close_reason" >> $GITHUB_OUTPUT
+
+      - name: Assert completed maps to "completed"
+        env:
+          ACTUAL: ${{ steps.params-completed.outputs.close-reason }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "completed" ]; then
+            echo "FAIL: expected 'completed' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"

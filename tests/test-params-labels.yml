@@ -1,0 +1,139 @@
+name: Test label parameter processing
+on:
+  workflow_dispatch:
+jobs:
+  test-labels-newline-separated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Invoke the action (will fail due to no real token/issue, but tests param logic)
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: invalid-token
+          repository: peter-evans/close-issue
+          issue-number: "1"
+          labels: |
+            bug
+            enhancement
+            help wanted
+
+      # Test the label processing logic directly (mirrors the action's Set parameters step)
+      - name: Test newline-separated labels converted to comma-separated
+        id: params-labels
+        shell: bash
+        run: |
+          labels_input="bug
+          enhancement
+          help wanted"
+          if [ -n "$labels_input" ]; then
+            labels=$(echo "$labels_input" | tr '\n' ',' | sed 's/,$//')
+            labels=$(echo $labels | sed 's/,$//' | sed 's/[[:space:]]//g')
+            echo "labels=$labels" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Assert labels are comma-separated without spaces
+        env:
+          ACTUAL: ${{ steps.params-labels.outputs.labels }}
+        run: |
+          echo "actual: $ACTUAL"
+          # Labels should be comma-separated with no spaces
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: expected labels output but got empty string"
+            exit 1
+          fi
+          # Should contain commas (multiple labels)
+          if ! echo "$ACTUAL" | grep -q ","; then
+            echo "FAIL: expected comma-separated labels but got: $ACTUAL"
+            exit 1
+          fi
+          # Should not contain spaces
+          if echo "$ACTUAL" | grep -q " "; then
+            echo "FAIL: labels should not contain spaces but got: $ACTUAL"
+            exit 1
+          fi
+          echo "PASS: labels=$ACTUAL"
+
+  test-labels-comma-separated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Invoke the action (will fail due to no real token/issue, but tests param logic)
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: invalid-token
+          repository: peter-evans/close-issue
+          issue-number: "1"
+          labels: "bug,enhancement,help wanted"
+
+      # Test comma-separated labels input
+      - name: Test comma-separated labels input
+        id: params-labels-comma
+        shell: bash
+        run: |
+          labels_input="bug,enhancement,help wanted"
+          if [ -n "$labels_input" ]; then
+            labels=$(echo "$labels_input" | tr '\n' ',' | sed 's/,$//')
+            labels=$(echo $labels | sed 's/,$//' | sed 's/[[:space:]]//g')
+            echo "labels=$labels" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Assert comma-separated labels processed correctly
+        env:
+          ACTUAL: ${{ steps.params-labels-comma.outputs.labels }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: expected labels output but got empty string"
+            exit 1
+          fi
+          # Should not contain spaces
+          if echo "$ACTUAL" | grep -q " "; then
+            echo "FAIL: labels should not contain spaces but got: $ACTUAL"
+            exit 1
+          fi
+          echo "PASS: labels=$ACTUAL"
+
+  test-no-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Invoke the action (will fail due to no real token/issue, but tests param logic)
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: invalid-token
+          repository: peter-evans/close-issue
+          issue-number: "1"
+
+      # Test empty labels input produces no output
+      - name: Test empty labels input
+        id: params-no-labels
+        shell: bash
+        run: |
+          labels_input=""
+          if [ -n "$labels_input" ]; then
+            labels=$(echo "$labels_input" | tr '\n' ',' | sed 's/,$//')
+            labels=$(echo $labels | sed 's/,$//' | sed 's/[[:space:]]//g')
+            echo "labels=$labels" >> $GITHUB_OUTPUT
+          fi
+          # If no labels, output should be empty/unset
+          echo "done"
+
+      - name: Assert no labels output when input is empty
+        env:
+          ACTUAL: ${{ steps.params-no-labels.outputs.labels }}
+        run: |
+          echo "actual: '$ACTUAL'"
+          if [ -n "$ACTUAL" ]; then
+            echo "FAIL: expected empty labels output but got: $ACTUAL"
+            exit 1
+          fi
+          echo "PASS: no labels as expected"

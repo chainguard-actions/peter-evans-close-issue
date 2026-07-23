@@ -1,0 +1,54 @@
+name: Test close with comment
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up mock gh CLI
+        run: |
+          printf '%s\n' '#!/bin/sh' \
+            'echo "$@" >> /tmp/gh-calls.log' \
+            'case "$1 $2" in' \
+            '  "issue close") echo "Closed issue"; exit 0 ;;' \
+            '  "issue edit") echo "Edited issue"; exit 0 ;;' \
+            '  *) echo "gh: $*"; exit 0 ;;' \
+            'esac' > /tmp/mock-gh
+          chmod +x /tmp/mock-gh
+          if [ -w /usr/local/bin ]; then
+            cp /tmp/mock-gh /usr/local/bin/gh
+          else
+            sudo cp /tmp/mock-gh /usr/local/bin/gh
+          fi
+          echo "Mock gh CLI installed"
+
+      - name: Close issue with comment using action
+        id: close-action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          issue-number: "55"
+          close-reason: completed
+          comment: "Closing this issue as resolved."
+
+      - name: Assert gh issue close was called with comment flag
+        run: |
+          echo "=== gh calls log ==="
+          cat /tmp/gh-calls.log || echo "(no calls logged)"
+          echo "===================="
+          if ! grep -q "issue close" /tmp/gh-calls.log; then
+            echo "FAIL: expected 'gh issue close' to be called"
+            exit 1
+          fi
+          if ! grep -q -- "--comment" /tmp/gh-calls.log; then
+            echo "FAIL: expected '--comment' flag in gh issue close call"
+            exit 1
+          fi
+          if ! grep -q "55" /tmp/gh-calls.log; then
+            echo "FAIL: expected issue number '55' in gh issue close call"
+            exit 1
+          fi
+          echo "PASS: gh issue close was called with --comment flag"

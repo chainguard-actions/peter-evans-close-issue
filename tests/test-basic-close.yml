@@ -1,0 +1,59 @@
+name: Test basic close (completed)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up mock gh CLI
+        run: |
+          printf '%s\n' '#!/bin/sh' \
+            'echo "$@" >> /tmp/gh-calls.log' \
+            'case "$1 $2" in' \
+            '  "issue close") echo "Closed issue"; exit 0 ;;' \
+            '  "issue edit") echo "Edited issue"; exit 0 ;;' \
+            '  *) echo "gh: $*"; exit 0 ;;' \
+            'esac' > /tmp/mock-gh
+          chmod +x /tmp/mock-gh
+          # Install mock gh to a location on PATH
+          if [ -w /usr/local/bin ]; then
+            cp /tmp/mock-gh /usr/local/bin/gh
+          else
+            sudo cp /tmp/mock-gh /usr/local/bin/gh
+          fi
+          gh --version || true
+          echo "Mock gh CLI installed"
+
+      - name: Close issue using action
+        id: close-action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          issue-number: "42"
+          close-reason: completed
+
+      - name: Assert gh issue close was called with correct args
+        run: |
+          echo "=== gh calls log ==="
+          cat /tmp/gh-calls.log || echo "(no calls logged)"
+          echo "===================="
+          if ! grep -q "issue close" /tmp/gh-calls.log; then
+            echo "FAIL: expected 'gh issue close' to be called"
+            exit 1
+          fi
+          if ! grep -q -- "--reason" /tmp/gh-calls.log; then
+            echo "FAIL: expected '--reason' flag in gh issue close call"
+            exit 1
+          fi
+          if ! grep -q "completed" /tmp/gh-calls.log; then
+            echo "FAIL: expected 'completed' reason in gh issue close call"
+            exit 1
+          fi
+          if ! grep -q "42" /tmp/gh-calls.log; then
+            echo "FAIL: expected issue number '42' in gh issue close call"
+            exit 1
+          fi
+          echo "PASS: gh issue close was called with correct arguments"

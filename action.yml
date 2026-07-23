@@ -55,12 +55,11 @@ runs:
           delimiter="$(openssl rand -hex 8)"
           safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
           echo "comment<<$delimiter" >> "$GITHUB_OUTPUT"
-          echo "$safe_comment" >> "$GITHUB_OUTPUT"
+          echo "--comment $safe_comment" >> "$GITHUB_OUTPUT"
           echo "$delimiter" >> "$GITHUB_OUTPUT"
         fi
 
-        safe_reason=$(printf '%s' "$INPUT_CLOSE_REASON" | tr -d '\n\r')
-        if [ "$safe_reason" == "not_planned" ]; then
+        if [ "$INPUT_CLOSE_REASON" == "not_planned" ]; then
           echo 'close-reason=not planned' >> "$GITHUB_OUTPUT"
         else
           echo 'close-reason=completed' >> "$GITHUB_OUTPUT"
@@ -79,14 +78,16 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
-        INPUT_CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
-        INPUT_COMMENT: ${{ steps.params.outputs.comment }}
         INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+        CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
+        COMMENT_ARG: ${{ steps.params.outputs.comment }}
       run: |
         args=()
-        [ -n "$INPUT_COMMENT" ] && args+=(--comment "$INPUT_COMMENT")
+        if [ -n "$COMMENT_ARG" ]; then
+          args+=(--comment "$COMMENT_ARG")
+        fi
         gh issue close -R "$INPUT_REPOSITORY" \
-          --reason "$INPUT_CLOSE_REASON" \
+          --reason "$CLOSE_REASON" \
           "${args[@]}" \
           "$INPUT_ISSUE_NUMBER"
     - name: Add Labels
@@ -95,11 +96,11 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
-        INPUT_LABELS: ${{ steps.params.outputs.labels }}
         INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+        LABELS: ${{ steps.params.outputs.labels }}
       run: |
         gh issue edit -R "$INPUT_REPOSITORY" \
-          --add-label "$INPUT_LABELS" \
+          --add-label "$LABELS" \
           "$INPUT_ISSUE_NUMBER"
 branding:
   icon: 'git-pull-request'

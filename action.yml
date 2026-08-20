@@ -51,16 +51,18 @@ runs:
         LABELS: ${{ inputs.labels }}
       run: |
         if [ "$CLOSE_REASON" == "not_planned" ]; then
-          echo close-reason="not planned" >> $GITHUB_OUTPUT
+          safe_reason=$(printf '%s' "not planned" | tr -d '\n\r')
+          echo "close-reason=$safe_reason" >> "$GITHUB_OUTPUT"
         else
-          echo close-reason="completed" >> $GITHUB_OUTPUT
+          safe_reason=$(printf '%s' "completed" | tr -d '\n\r')
+          echo "close-reason=$safe_reason" >> "$GITHUB_OUTPUT"
         fi
 
         # Convert labels to comma separated list
         if [ -n "$LABELS" ]; then
-          labels=$(printf '%s' "$LABELS" | tr -d '\r' | tr '\n' ',' | sed 's/,$//')
+          labels=$(echo "$LABELS" | tr '\n' ',' | sed 's/,$//')
           # Remove trailing comma and whitespace
-          labels=$(printf '%s' "$labels" | tr -d '\r' | sed 's/,$//' | sed 's/[[:space:]]//g')
+          labels=$(echo "$labels" | sed 's/,$//' | sed 's/[[:space:]]//g')
           safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')
           echo "labels=$safe_labels" >> "$GITHUB_OUTPUT"
         fi

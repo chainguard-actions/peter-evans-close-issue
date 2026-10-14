@@ -52,8 +52,7 @@ runs:
         INPUT_LABELS: ${{ inputs.labels }}
       run: |
         if [ -n "$INPUT_COMMENT" ]; then
-          safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
-          comment="--comment \"$safe_comment\""
+          comment="--comment \"$INPUT_COMMENT\""
           delimiter="$(openssl rand -hex 8)"
           echo "comment<<$delimiter" >> $GITHUB_OUTPUT
           echo "$comment" >> $GITHUB_OUTPUT
@@ -86,7 +85,7 @@ runs:
         args=()
         if [ -n "$PARAMS_COMMENT" ]; then
           while IFS= read -r -d '' t; do args+=("$t"); done \
-            < <(printf '%s' "$PARAMS_COMMENT" | xargs printf '%s\0')
+            < <(printf '%s' "$PARAMS_COMMENT" | xargs -r printf '%s\0')
         fi
         gh issue close -R "$INPUT_REPOSITORY" \
         --reason "$PARAMS_CLOSE_REASON" \

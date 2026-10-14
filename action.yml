@@ -52,17 +52,18 @@ runs:
         INPUT_LABELS: ${{ inputs.labels }}
       run: |
         if [ -n "$INPUT_COMMENT" ]; then
-          delimiter="$(openssl rand -hex 8)"
           safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
-          echo "comment<<$delimiter" >> "$GITHUB_OUTPUT"
-          echo "--comment $safe_comment" >> "$GITHUB_OUTPUT"
-          echo "$delimiter" >> "$GITHUB_OUTPUT"
+          comment="--comment \"$safe_comment\""
+          delimiter="$(openssl rand -hex 8)"
+          echo "comment<<$delimiter" >> $GITHUB_OUTPUT
+          echo "$comment" >> $GITHUB_OUTPUT
+          echo "$delimiter" >> $GITHUB_OUTPUT
         fi
 
         if [ "$INPUT_CLOSE_REASON" == "not_planned" ]; then
-          echo 'close-reason=not planned' >> "$GITHUB_OUTPUT"
+          echo close-reason="not planned" >> $GITHUB_OUTPUT
         else
-          echo 'close-reason=completed' >> "$GITHUB_OUTPUT"
+          echo close-reason="completed" >> $GITHUB_OUTPUT
         fi
 
         # Convert labels to comma separated list
@@ -71,7 +72,7 @@ runs:
           # Remove trailing comma and whitespace
           labels=$(printf '%s' "$labels" | sed 's/,$//' | sed 's/[[:space:]]//g')
           safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')
-          echo "labels=$safe_labels" >> "$GITHUB_OUTPUT"
+          echo "labels=$safe_labels" >> $GITHUB_OUTPUT
         fi
     - name: Close Issue
       shell: bash
@@ -79,17 +80,18 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
         INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
-        CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
-        COMMENT_ARG: ${{ steps.params.outputs.comment }}
+        PARAMS_CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
+        PARAMS_COMMENT: ${{ steps.params.outputs.comment }}
       run: |
         args=()
-        if [ -n "$COMMENT_ARG" ]; then
-          args+=(--comment "$COMMENT_ARG")
+        if [ -n "$PARAMS_COMMENT" ]; then
+          while IFS= read -r -d '' t; do args+=("$t"); done \
+            < <(printf '%s' "$PARAMS_COMMENT" | xargs printf '%s\0')
         fi
         gh issue close -R "$INPUT_REPOSITORY" \
-          --reason "$CLOSE_REASON" \
-          "${args[@]}" \
-          "$INPUT_ISSUE_NUMBER"
+        --reason "$PARAMS_CLOSE_REASON" \
+        "${args[@]}" \
+        "$INPUT_ISSUE_NUMBER"
     - name: Add Labels
       if: steps.params.outputs.labels != ''
       shell: bash
@@ -97,11 +99,11 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
         INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
-        LABELS: ${{ steps.params.outputs.labels }}
+        PARAMS_LABELS: ${{ steps.params.outputs.labels }}
       run: |
         gh issue edit -R "$INPUT_REPOSITORY" \
-          --add-label "$LABELS" \
-          "$INPUT_ISSUE_NUMBER"
+        --add-label "$PARAMS_LABELS" \
+        "$INPUT_ISSUE_NUMBER"
 branding:
   icon: 'git-pull-request'
   color: 'gray-dark'

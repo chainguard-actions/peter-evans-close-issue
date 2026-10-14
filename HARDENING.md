@@ -10,110 +10,73 @@
 
 **Harden Agent Version:** `2`
 
-Action **peter-evans--close-issue/v3.0.1** was hardened automatically. 13 finding(s) were identified and resolved across 2 iteration(s).
+Action **peter-evans--close-issue/v3.0.1** was hardened automatically. 11 finding(s) were identified and resolved across 2 iteration(s).
 
 ## Findings Fixed
 
 ### script-injection (severity: high)
 
-Sub-rule (a): Multiple ${{ ... }} expressions are directly interpolated inside run: shell command strings in action.yml. This allows an attacker-controlled value to be parsed by the shell before quoting can protect it.
+Sub-rule (a): Multiple `${{ ... }}` expressions are interpolated directly inside `run:` shell command strings across all three composite steps, allowing an attacker-controlled input to inject arbitrary shell commands.
 
-In the 'Set parameters' step (action.yml):
-- Line 27: `if [ -n "${{ inputs.comment }}" ]` — inputs.comment interpolated directly
-- Line 28: `comment="--comment \"${{ inputs.comment }}\""` — inputs.comment interpolated directly
-- Line 33: `if [ "${{ inputs.close-reason }}" == "not_planned" ]` — inputs.close-reason interpolated directly
-- Line 39: `if [ -n "${{ inputs.labels }}" ]` — inputs.labels interpolated directly
-- Line 40: `labels=$(echo "${{ inputs.labels }}" | ...)` — inputs.labels interpolated directly
+**Step "Set parameters" (lines 31–46):**
+- Line 31: `if [ -n "${{ inputs.comment }}" ]; then`
+- Line 32: `comment="--comment \"${{ inputs.comment }}\""`
+- Line 39: `if [ "${{ inputs.close-reason }}" == "not_planned" ]; then`
+- Line 45: `if [ -n "${{ inputs.labels }}" ]; then`
+- Line 46: `labels=$(echo "${{ inputs.labels }}" | tr '\n' ',' | sed 's/,$//')`
 
-In the 'Close Issue' step (action.yml):
-- Line 46: `gh issue close -R "${{ inputs.repository }}"` — inputs.repository interpolated directly
-- Line 47: `--reason "${{ steps.params.outputs.close-reason }}"` — steps output interpolated directly
-- Line 48: `${{ steps.params.outputs.comment }}` — steps output interpolated directly (also unquoted)
-- Line 49: `"${{ inputs.issue-number }}"` — inputs.issue-number interpolated directly
+**Step "Close Issue" (lines 53–56):**
+- Line 53: `gh issue close -R "${{ inputs.repository }}"`
+- Line 54: `--reason "${{ steps.params.outputs.close-reason }}"`
+- Line 55: `${{ steps.params.outputs.comment }}` (also unquoted)
+- Line 56: `"${{ inputs.issue-number }}"`
 
-In the 'Add Labels' step (action.yml):
-- Line 54: `gh issue edit -R "${{ inputs.repository }}"` — inputs.repository interpolated directly
-- Line 55: `--add-label "${{ steps.params.outputs.labels }}"` — steps output interpolated directly
-- Line 56: `"${{ inputs.issue-number }}"` — inputs.issue-number interpolated directly
+**Step "Add Labels" (lines 63–65):**
+- Line 63: `gh issue edit -R "${{ inputs.repository }}"`
+- Line 64: `--add-label "${{ steps.params.outputs.labels }}"`
+- Line 65: `"${{ inputs.issue-number }}"`
 
-In update-major-version.yml 'Tag new target' and 'Push new tag' steps:
-- Line 24: `git tag -f ${{ github.event.inputs.main_version }} ${{ github.event.inputs.target }}` — workflow_dispatch inputs interpolated directly and unquoted
-- Line 25: `git push origin ${{ github.event.inputs.main_version }} --force` — workflow_dispatch input interpolated directly and unquoted
+All inputs (`inputs.comment`, `inputs.close-reason`, `inputs.labels`, `inputs.repository`, `inputs.issue-number`) and step outputs (`steps.params.outputs.*`) are workflow-controllable and must be passed via `env:` variables and referenced as quoted `"$VAR"` shell variables instead of being interpolated directly.
 
 Locations:
 
-- `action.yml:27`
-- `action.yml:28`
-- `action.yml:33`
+- `action.yml:31`
+- `action.yml:32`
 - `action.yml:39`
-- `action.yml:40`
+- `action.yml:45`
 - `action.yml:46`
-- `action.yml:47`
-- `action.yml:48`
-- `action.yml:49`
+- `action.yml:53`
 - `action.yml:54`
 - `action.yml:55`
 - `action.yml:56`
-- `.github/workflows/update-major-version.yml:24`
-- `.github/workflows/update-major-version.yml:25`
+- `action.yml:63`
+- `action.yml:64`
+- `action.yml:65`
 
 ### github-env-injection (severity: high)
 
-The 'Set parameters' step in action.yml writes values derived from untrusted inputs to $GITHUB_OUTPUT without the required sanitization step (`printf '%s' ... | tr -d '\n\r'`).
+The "Set parameters" step writes values derived from untrusted `inputs.*` to `$GITHUB_OUTPUT` without the required sanitization step (`printf '%s' ... | tr -d '\n\r'`). An attacker-controlled newline character in the input can inject arbitrary key=value pairs into `$GITHUB_OUTPUT`, potentially overwriting subsequent outputs or poisoning the step-output context.
 
-(a) `${{ inputs.comment }}` is interpolated directly into the shell variable `$comment`, which is then written to $GITHUB_OUTPUT via `echo "$comment" >> $GITHUB_OUTPUT` (line ~30). An attacker can inject newlines into inputs.comment to poison subsequent GITHUB_OUTPUT entries.
+**Finding 1 — `inputs.comment` → `$GITHUB_OUTPUT` (line 35):**
+`inputs.comment` is interpolated into the shell variable `comment` (line 32) and then written unsanitized:
+```
+echo "$comment" >> $GITHUB_OUTPUT
+```
+A value containing a newline (e.g. `foo\nmalicious-key=injected`) will inject an extra key into `$GITHUB_OUTPUT`.
 
-(b) `${{ inputs.labels }}` is interpolated directly into a shell pipeline and the result is written to $GITHUB_OUTPUT via `echo labels=$labels >> $GITHUB_OUTPUT` (line ~42) without sanitization.
+**Finding 2 — `inputs.labels` → `$GITHUB_OUTPUT` (line 49):**
+`inputs.labels` is processed into the shell variable `labels` (line 46) and then written unsanitized:
+```
+echo labels=$labels >> $GITHUB_OUTPUT
+```
+The `tr '\n' ','` transformation only converts newlines to commas within the pipeline; the final `$labels` value is still written without `tr -d '\n\r'` sanitization before the `>> $GITHUB_OUTPUT` write.
 
-(c) `echo close-reason=... >> $GITHUB_OUTPUT` writes literal strings, but the branch condition itself uses `${{ inputs.close-reason }}` directly (line 33), which is a script-injection vector that also affects the output value.
-
-None of these writes are preceded by `printf '%s' "$VAR" | tr -d '\n\r'`.
-
-Locations:
-
-- `action.yml:27`
-- `action.yml:30`
-- `action.yml:39`
-- `action.yml:42`
-
-### unpinned-uses (severity: high)
-
-All `uses:` references in workflow files use mutable version tags instead of pinned 40-character SHA digests, making the workflows vulnerable to supply-chain attacks if the referenced action tags are moved or compromised.
-
-Failing references:
-- automerge-dependabot.yml: `uses: peter-evans/enable-pull-request-automerge@v3`
-- ci.yml: `uses: actions/checkout@v3`
-- ci.yml: `uses: actions/upload-artifact@v3`
-- ci.yml: `uses: actions/checkout@v3` (test job)
-- ci.yml: `uses: actions/download-artifact@v3`
-- ci.yml: `uses: peter-evans/create-issue-from-file@v4`
-- slash-command-dispatch.yml: `uses: peter-evans/slash-command-dispatch@v3`
-- update-major-version.yml: `uses: actions/checkout@v3`
+Fix: apply `safe=$(printf '%s' "$VAR" | tr -d '\n\r')` immediately before each write to `$GITHUB_OUTPUT`.
 
 Locations:
 
-- `.github/workflows/automerge-dependabot.yml:10`
-- `.github/workflows/ci.yml:20`
-- `.github/workflows/ci.yml:21`
-- `.github/workflows/ci.yml:31`
-- `.github/workflows/ci.yml:32`
-- `.github/workflows/ci.yml:38`
-- `.github/workflows/slash-command-dispatch.yml:8`
-- `.github/workflows/update-major-version.yml:18`
-
-### missing-permissions (severity: medium)
-
-Three workflow files have no top-level `permissions:` key and no job-level `permissions:` key on any of their jobs. Without explicit permissions, workflows inherit the default repository permissions (which may be `write-all` depending on repository settings), granting unnecessary access to the GITHUB_TOKEN.
-
-- automerge-dependabot.yml: No permissions block at top-level or job level. The workflow uses a PAT (ACTIONS_BOT_TOKEN) but the implicit GITHUB_TOKEN permissions are still unrestricted.
-- slash-command-dispatch.yml: No permissions block at top-level or job level.
-- update-major-version.yml: No permissions block at top-level or job level.
-
-Locations:
-
-- `.github/workflows/automerge-dependabot.yml:1`
-- `.github/workflows/slash-command-dispatch.yml:1`
-- `.github/workflows/update-major-version.yml:1`
+- `action.yml:35`
+- `action.yml:49`
 
 ### static-inline-injection (severity: high)
 
@@ -191,27 +154,23 @@ Locations:
 
 ### Iteration 1
 
-**Fixes applied:** script-injection, github-env-injection, unpinned-uses, missing-permissions, static-inline-injection
+**Fixes applied:** script-injection, github-env-injection, static-inline-injection
 
 **Notes:**
 
-Fixed all findings across action.yml and the four workflow files:
+Fixed all script-injection and github-env-injection findings in action.yml:
 
-1. action.yml (script-injection, github-env-injection, static-inline-injection): All ${{ inputs.* }} and ${{ steps.*.outputs.* }} expressions moved to env: blocks. Shell scripts use plain $VAR references. Values written to $GITHUB_OUTPUT are sanitized with `printf '%s' | tr -d '\n\r'`. The --comment flag in 'Close Issue' uses a bash array to keep flag and value as separate arguments.
+1. **Set parameters step**: Moved `inputs.comment`, `inputs.close-reason`, and `inputs.labels` to `env:` block as `INPUT_COMMENT`, `INPUT_CLOSE_REASON`, `INPUT_LABELS`. Updated shell script to reference these env vars. Added `safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')` before writing labels to $GITHUB_OUTPUT. The comment output uses heredoc delimiter form (already safe for multi-line values per the rules).
 
-2. automerge-dependabot.yml: Added `permissions: {pull-requests: write, contents: write}` and pinned peter-evans/enable-pull-request-automerge to SHA a660677d5469627102a1c1e11409dd063606628d.
+2. **Close Issue step**: Moved `inputs.repository`, `inputs.issue-number`, `steps.params.outputs.close-reason`, and `steps.params.outputs.comment` to `env:` block. The `PARAMS_COMMENT` value (which contains `--comment "..."`) is tokenized via xargs into a bash array to preserve argument boundaries.
 
-3. ci.yml: Pinned all four action references to full SHA digests (actions/checkout, actions/upload-artifact, actions/download-artifact, peter-evans/create-issue-from-file).
-
-4. slash-command-dispatch.yml: Added `permissions: {issues: read, pull-requests: read}` and pinned peter-evans/slash-command-dispatch to SHA f996d7b7aae9059759ac55e978cff76d91853301.
-
-5. update-major-version.yml: Added `permissions: {contents: write}`, pinned actions/checkout to SHA a37ce9120846195fa4ece8f58b268e6043cb2f26, and moved workflow_dispatch inputs into env: blocks to fix script injection in 'Tag new target' and 'Push new tag' steps.
+3. **Add Labels step**: Moved `inputs.repository`, `inputs.issue-number`, and `steps.params.outputs.labels` to `env:` block. Shell script references these as quoted env vars.
 
 ### Iteration 2
 
-**Fixes applied:** script-injection
+**Fixes applied:** github-env-injection
 
 **Notes:**
 
-Fixed script injection in .github/workflows/ci.yml at line 38. Moved the `${{ matrix.os }}` expression out of the `run:` shell command and into an `env:` block as `OS: ${{ matrix.os }}`. The shell command now uses `$OS` instead of the direct template expression, preventing shell metacharacters in the value from being executed.
+Fixed the github-env-injection finding in action.yml at line 35. Added sanitization of INPUT_COMMENT before embedding it in the comment variable: `safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')`. The `comment` variable now uses `$safe_comment` instead of `$INPUT_COMMENT`, stripping all newlines and carriage returns from the user-controlled input before it's written to $GITHUB_OUTPUT. The heredoc delimiter form is preserved as it correctly handles the key boundary.
 

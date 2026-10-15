@@ -52,11 +52,8 @@ runs:
         INPUT_LABELS: ${{ inputs.labels }}
       run: |
         if [ -n "$INPUT_COMMENT" ]; then
-          comment="--comment \"$INPUT_COMMENT\""
-          delimiter="$(openssl rand -hex 8)"
-          echo "comment<<$delimiter" >> $GITHUB_OUTPUT
-          echo "$comment" >> $GITHUB_OUTPUT
-          echo "$delimiter" >> $GITHUB_OUTPUT
+          safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
+          echo "comment=$safe_comment" >> $GITHUB_OUTPUT
         fi
 
         if [ "$INPUT_CLOSE_REASON" == "not_planned" ]; then
@@ -84,13 +81,12 @@ runs:
       run: |
         args=()
         if [ -n "$PARAMS_COMMENT" ]; then
-          while IFS= read -r -d '' t; do args+=("$t"); done \
-            < <(printf '%s' "$PARAMS_COMMENT" | xargs -r printf '%s\0')
+          args+=(--comment "$PARAMS_COMMENT")
         fi
         gh issue close -R "$INPUT_REPOSITORY" \
-        --reason "$PARAMS_CLOSE_REASON" \
-        "${args[@]}" \
-        "$INPUT_ISSUE_NUMBER"
+          --reason "$PARAMS_CLOSE_REASON" \
+          "${args[@]}" \
+          "$INPUT_ISSUE_NUMBER"
     - name: Add Labels
       if: steps.params.outputs.labels != ''
       shell: bash
@@ -101,8 +97,8 @@ runs:
         PARAMS_LABELS: ${{ steps.params.outputs.labels }}
       run: |
         gh issue edit -R "$INPUT_REPOSITORY" \
-        --add-label "$PARAMS_LABELS" \
-        "$INPUT_ISSUE_NUMBER"
+          --add-label "$PARAMS_LABELS" \
+          "$INPUT_ISSUE_NUMBER"
 branding:
   icon: 'git-pull-request'
   color: 'gray-dark'

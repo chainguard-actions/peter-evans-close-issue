@@ -4,75 +4,46 @@
 
 > This file was generated automatically by the hardening agent.
 
-**Policy SHA:** `d636be7e43ef829af6e853da6b3c7566db9f72fe`
+**Policy SHA:** `374911c4be584df24e6da57af2d990570ef0f859`
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
 **Harden Agent Version:** `2`
 
-Action **peter-evans--close-issue/v3.0.1** was hardened automatically. 13 finding(s) were identified and resolved across 2 iteration(s).
+Action **peter-evans--close-issue/v3.0.1** was hardened automatically. 14 finding(s) were identified and resolved across 2 iteration(s).
 
 ## Findings Fixed
 
 ### script-injection (severity: high)
 
-Step 'Set parameters' (action.yml): Multiple ${{ }} expressions from `inputs.*` are interpolated directly into the run: shell script without going through env: variables. This allows an attacker-controlled input to inject arbitrary shell commands. Offending lines:
-- Line 31: `if [ -n "${{ inputs.comment }}" ]; then`
-- Line 32: `comment="--comment \"${{ inputs.comment }}\""`
-- Line 39: `if [ "${{ inputs.close-reason }}" == "not_planned" ]; then`
-- Line 45: `if [ -n "${{ inputs.labels }}" ]; then`
-- Line 46: `labels=$(echo "${{ inputs.labels }}" | tr '\n' ',' | sed 's/,$//')`
-Violates sub-rule (a): direct expression interpolation inside run: block.
+Rule (a): the 'Set parameters' step puts ${{ }} expressions straight into the run: script, for example `if [ -n "${{ inputs.comment }}" ]; then`, `comment="--comment \"${{ inputs.comment }}\""`, `if [ "${{ inputs.close-reason }}" == "not_planned" ]`, and `labels=$(echo "${{ inputs.labels }}" | ...)`. Rule (b): it also expands workflow-derived data without quotes, as in `labels=$(echo $labels | ...)` and `echo labels=$labels`. An attacker-controlled comment or label value can break out of the quotes and run arbitrary commands.
 
 Locations:
 
-- `action.yml:31`
 - `action.yml:32`
-- `action.yml:39`
-- `action.yml:45`
-- `action.yml:46`
 
 ### script-injection (severity: high)
 
-Step 'Close Issue' (action.yml): Multiple ${{ }} expressions from `inputs.*` and `steps.*.outputs.*` are interpolated directly into the run: shell script. Notably, `${{ steps.params.outputs.comment }}` is interpolated completely unquoted, making shell metacharacter injection trivial. Offending lines:
-- Line 55: `gh issue close -R "${{ inputs.repository }}"`
-- Line 56: `--reason "${{ steps.params.outputs.close-reason }}"`
-- Line 57: `${{ steps.params.outputs.comment }}` (unquoted — sub-rule (a) and (b))
-- Line 58: `"${{ inputs.issue-number }}"`
-Violates sub-rule (a): direct expression interpolation inside run: block.
+Rule (a): the 'Close Issue' step puts ${{ inputs.repository }}, ${{ steps.params.outputs.close-reason }}, ${{ steps.params.outputs.comment }} (unquoted) and ${{ inputs.issue-number }} straight into the run: script. The comment output comes from inputs.comment, so the template substitution allows command injection.
 
 Locations:
 
 - `action.yml:55`
-- `action.yml:56`
-- `action.yml:57`
-- `action.yml:58`
 
 ### script-injection (severity: high)
 
-Step 'Add Labels' (action.yml): Multiple ${{ }} expressions from `inputs.*` and `steps.*.outputs.*` are interpolated directly into the run: shell script. Offending lines:
-- Line 64: `gh issue edit -R "${{ inputs.repository }}"`
-- Line 65: `--add-label "${{ steps.params.outputs.labels }}"`
-- Line 66: `"${{ inputs.issue-number }}"`
-Violates sub-rule (a): direct expression interpolation inside run: block.
+Rule (a): the 'Add Labels' step puts ${{ inputs.repository }}, ${{ steps.params.outputs.labels }} and ${{ inputs.issue-number }} straight into the run: script.
 
 Locations:
 
-- `action.yml:64`
-- `action.yml:65`
 - `action.yml:66`
 
 ### github-env-injection (severity: high)
 
-Step 'Set parameters' (action.yml): Values derived from untrusted inputs are written to $GITHUB_OUTPUT without the required sanitization step (`printf '%s' ... | tr -d '\n\r'`). Specifically:
-- `inputs.comment` is stored in the shell variable `$comment` (line 32) and then written to $GITHUB_OUTPUT via a heredoc-style delimiter block (lines 34–36). An attacker can inject newlines into `inputs.comment` to poison the output file.
-- `inputs.labels` is processed and stored in `$labels` (line 46) and written to $GITHUB_OUTPUT (line 49) without sanitization.
-This allows an attacker to inject arbitrary key=value pairs into $GITHUB_OUTPUT, potentially overwriting other outputs or injecting environment variables.
+The 'Set parameters' step builds a value from inputs.labels and writes it to $GITHUB_OUTPUT with `echo labels=$labels >> $GITHUB_OUTPUT`. The required `printf '%s' ... | tr -d '\n\r'` step does not run right before the write. (The comment output passes because it is written between delimiters from openssl rand.)
 
 Locations:
 
-- `action.yml:34`
-- `action.yml:35`
 - `action.yml:49`
 
 ### static-inline-injection (severity: high)
@@ -147,27 +118,122 @@ Locations:
 
 - `action.yml:71`
 
+### prior-fix (severity: high)
+
+Carried forward from this version's previous harden, which fixed it; fix it again unless the code no longer has the problem. The previous harden changed action.yml without recording a finding for it, and this analysis reported nothing there. Re-apply its security changes unless the code no longer needs them. The previous patch:
+```diff
+diff --git a/action.yml b/action.yml
+index d097152..934f4c4 100644
+--- a/action.yml
++++ b/action.yml
+@@ -26,52 +26,79 @@ inputs:
+ runs:
+   using: composite
+   steps:
+     - name: Set parameters
+       id: params
+       shell: bash
++      env:
++        INPUT_COMMENT: ${{ inputs.comment }}
++        INPUT_CLOSE_REASON: ${{ inputs.close-reason }}
++        INPUT_LABELS: ${{ inputs.labels }}
+       run: |
+-        if [ -n "${{ inputs.comment }}" ]; then
+-          comment="--comment \"${{ inputs.comment }}\""
+-          delimiter="$(openssl rand -hex 8)"
+-          echo "comment<<$delimiter" >> $GITHUB_OUTPUT
+-          echo "$comment" >> $GITHUB_OUTPUT
+-          echo "$delimiter" >> $GITHUB_OUTPUT
++        if [ -n "$INPUT_COMMENT" ]; then
++          safe_comment=$(printf '%s' "$INPUT_COMMENT" | tr -d '\n\r')
++          echo "comment=$safe_comment" >> $GITHUB_OUTPUT
+         fi
+ 
+-        if [ "${{ inputs.close-reason }}" == "not_planned" ]; then
++        if [ "$INPUT_CLOSE_REASON" == "not_planned" ]; then
+           echo close-reason="not planned" >> $GITHUB_OUTPUT
+         else
+           echo close-reason="completed" >> $GITHUB_OUTPUT
+         fi
+ 
+         # Convert labels to comma separated list
+-        if [ -n "${{ inputs.labels }}" ]; then
+-          labels=$(echo "${{ inputs.labels }}" | tr '\n' ',' | sed 's/,$//')
++        if [ -n "$INPUT_LABELS" ]; then
++          labels=$(printf '%s' "$INPUT_LABELS" | tr '\n' ',' | sed 's/,$//')
+           # Remove trailing comma and whitespace
+-          labels=$(echo $labels | sed 's/,$//' | sed 's/[[:space:]]//g')
+-          echo labels=$labels >> $GITHUB_OUTPUT
++          labels=$(printf '%s' "$labels" | sed 's/,$//' | sed 's/[[:space:]]//g')
++          safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')
++          echo "labels=$safe_labels" >> $GITHUB_OUTPUT
+         fi
+-
+     - name: Close Issue
+       shell: bash
+-      run: |
+-        gh issue close -R "${{ inputs.repository }}" \
+-        --reason "${{ steps.params.outputs.close-reason }}" \
+-        ${{ steps.params.outputs.comment }} \
+-        "${{ inputs.issue-number }}"
+       env:
+         GH_TOKEN: ${{ inputs.token }}
+-
++        INPUT_REPOSITORY: ${{ inputs.repository }}
++        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
++        PARAMS_CLOSE_REASON: ${{ steps.params.outputs.close-reason }}
++        PARAMS_COMMENT: ${{ steps.params.outputs.comment }}
++      run: |
++        args=()
++        if [ -n "$PARAMS_COMMENT" ]; then
++          args+=(--comment "$PARAMS_COMMENT")
++        fi
++        gh issue close -R "$INPUT_REPOSITORY" \
++          --reason "$PARAMS_CLOSE_REASON" \
++          "${args[@]}" \
++          "$INPUT_ISSUE_NUMBER"
+     - name: Add Labels
+       if: steps.params.outputs.labels != ''
+       shell: bash
+-      run: |
+-        gh issue edit -R "${{ inputs.repository }}" \
+-        --add-label "${{ steps.params.outputs.labels }}" \
+-        "${{ inputs.issue-number }}"
+       env:
+         GH_TOKEN: ${{ inputs.token }}
+-
++        INPUT_REPOSITORY: ${{ inputs.repository }}
++        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
++        PARAMS_LABELS: ${{ steps.params.outputs.labels }}
++      run: |
++        gh issue edit -R "$INPUT_REPOSITORY" \
++          --add-label "$PARAMS_LABELS" \
++          "$INPUT_ISSUE_NUMBER"
+ branding:
+   icon: 'git-pull-request'
+   color: 'gray-dark'
+
+```
+
+Locations:
+
+- `action.yml`
+
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** script-injection, github-env-injection, static-inline-injection
+**Fixes applied:** script-injection, github-env-injection, static-inline-injection, prior-fix
 
 **Notes:**
 
-Rewrote action.yml to fix all script injection and github-env-injection findings:
+action.yml: every ${{ }} expression is now in step env: blocks, and the scripts read them as quoted shell variables. The comment is still written to GITHUB_OUTPUT between delimiters from openssl rand, so multi-line comments survive. It is now the raw comment text instead of a shell fragment built as --comment "...". The Close Issue step builds --comment with a bash array, so the flag and its value stay separate arguments and the value is never parsed as shell code. The labels value has newlines and carriage returns stripped with printf | tr -d '\n\r' right before it is written. The step also no longer expands $labels unquoted. Close reason, repository and issue number are passed as quoted env vars. The prior harden's changes are covered. Unlike that patch, this keeps the multi-line comment form instead of stripping newlines from the comment.
 
-1. Set parameters step: Moved inputs.comment, inputs.close-reason, and inputs.labels to env: block as INPUT_COMMENT, INPUT_CLOSE_REASON, INPUT_LABELS. Shell script uses only $INPUT_* variables. Labels are sanitized with 'printf | tr -d \n\r' before writing to GITHUB_OUTPUT. Comment is stored as raw text via heredoc (random delimiter prevents injection; per rules, no newline stripping for heredoc-delimited values).
+### Iteration 1
 
-2. Close Issue step: Moved inputs.repository, inputs.issue-number, steps.params.outputs.close-reason, and steps.params.outputs.comment to env: block. The previously unquoted ${{ steps.params.outputs.comment }} is now handled via a bash array (args+=(--comment "$PARAMS_COMMENT")) to keep flag and value as separate arguments.
-
-3. Add Labels step: Moved inputs.repository, inputs.issue-number, and steps.params.outputs.labels to env: block. Shell script uses only $INPUT_* and $PARAMS_* variables.
-
-### Iteration 2
-
-**Fixes applied:** github-env-injection
+**Fixes applied:** publish-gate
 
 **Notes:**
 
-Fixed the 'Set parameters' step in action.yml: replaced the heredoc delimiter approach for writing the `comment` output with a sanitized single-line write. The comment value is now sanitized using `printf '%s' "$INPUT_COMMENT" | tr -d '\n\r'` before being written to $GITHUB_OUTPUT as `echo "comment=$safe_comment" >> $GITHUB_OUTPUT`. This prevents newline injection attacks where an attacker could smuggle additional key=value pairs into the GitHub output context. The fix follows the same pattern already used for the `labels` output in the same step.
+Values are no longer passed between steps through $GITHUB_OUTPUT. The comment input now goes straight to 'gh issue close' through env as one argument (args+=(--comment "$INPUT_COMMENT")). The labels list is now built inside the Add Labels step from inputs.labels, using upstream's conversion (newlines become commas, trailing comma and whitespace removed), and is passed straight to 'gh issue edit --add-label'. That step runs only when inputs.labels != ''. This removes the safe_labels output and the comment heredoc output. The close-reason output is unchanged. I did not run the action or re-run the checks.
 

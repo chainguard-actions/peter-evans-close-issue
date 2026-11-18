@@ -51,11 +51,9 @@ runs:
         LABELS: ${{ inputs.labels }}
       run: |
         if [ "$CLOSE_REASON" == "not_planned" ]; then
-          safe_reason=$(printf '%s' "not planned" | tr -d '\n\r')
-          echo "close-reason=$safe_reason" >> "$GITHUB_OUTPUT"
+          echo "close-reason=not planned" >> "$GITHUB_OUTPUT"
         else
-          safe_reason=$(printf '%s' "completed" | tr -d '\n\r')
-          echo "close-reason=$safe_reason" >> "$GITHUB_OUTPUT"
+          echo "close-reason=completed" >> "$GITHUB_OUTPUT"
         fi
 
         # Convert labels to comma separated list
@@ -66,6 +64,7 @@ runs:
           safe_labels=$(printf '%s' "$labels" | tr -d '\n\r')
           echo "labels=$safe_labels" >> "$GITHUB_OUTPUT"
         fi
+
     - name: Close Issue
       shell: bash
       env:
@@ -83,6 +82,7 @@ runs:
           --reason "$CLOSE_REASON" \
           "${comment_args[@]}" \
           "$ISSUE_NUMBER"
+
     - name: Add Labels
       if: steps.params.outputs.labels != ''
       shell: bash
@@ -95,6 +95,7 @@ runs:
         gh issue edit -R "$REPOSITORY" \
           --add-label "$LABELS" \
           "$ISSUE_NUMBER"
+
 branding:
   icon: 'git-pull-request'
   color: 'gray-dark'
